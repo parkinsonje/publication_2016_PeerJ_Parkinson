@@ -1,0 +1,461 @@
+## Color Analysis Markdown
+v15.07.26  
+John Parkinson  
+jparkinson@psu.edu
+
+This R markdown file reproduces the analysis from:  
+**"A citizen science approach to monitoring bleaching in the zoantharian 
+*Palythoa tuberculosa*"**  
+Parkinson JE, Yang SY, Kawamura I, Byron G, Todd P, Reimer JD 
+
+*Please make sure to set the working director to the folder containing the
+original data files:  
+'parkinson_all_data.txt', 'hibino_bubble_data.txt', 
+'hibino_color_data.txt', and 'hibino_nzpercent_data.txt* 
+
+### Load libraries
+```{r Load Libraries,echo=TRUE}
+# setwd("PATH/TO/FOLDER/CONTAINING/DATA/FILES")
+setwd("~/Desktop/final_color_analysis/") # Please change this path as needed
+
+suppressMessages(library('dplyr')) # To tidy data
+suppressMessages(library('reshape2')) # To reshape variable data
+suppressMessages(library('psych')) # For creating correlation coefficient graphs
+suppressMessages(library('irr')) # For the meanrho function
+suppressMessages(library('bootstrap')) # To jackknife Krippendorff's alpha
+suppressMessages(library('ggplot2')) # For graphs
+suppressMessages(library('grid')) # For multiplot function
+suppressMessages(library('gridExtra')) # For arranging Grobs to export
+```
+
+### Load data
+```{r Load Data, echo=TRUE}
+
+# All January 2014 data
+data_all <- data.frame(read.table("parkinson_all_data.txt",head=TRUE))
+
+# Hibino et al. color data
+color_hibino <- data.frame(
+        read.table("hibino_color_data.txt",head=TRUE,check.names=FALSE))
+
+# Hibino et al. NZ percent data
+nz_hibino <- data.frame(read.table("hibino_nzpercent_data.txt",
+        head=TRUE,check.names=FALSE))
+
+# Hibino et al. bubble plot data
+data_bub <- read.table("hibino_bubble_data.txt",head=TRUE,check.names=FALSE)
+```
+
+### Test for observer reliability and correlation
+```{r Test for observer reliability and correlation, echo=TRUE}
+
+# Functions from Derek Jones:
+# <http://www.r-bloggers.com/
+#       agreement-between-code-readability-ratings-given-by-students/>
+
+# Test observer reliability with Krippendorf's alpha
+
+kripp.alpha_theta = function(x, xdata)
+        {
+        kripp.alpha(as.matrix(xdata[x,]), method="interval")$value
+        }
+
+jk_kripp.alpha = function(cs_subj)
+        {
+        cs_jackknife = jackknife(1:nrow(cs_subj), kripp.alpha_theta, cs_subj)
+        quantile(cs_jackknife$jack.values, c(0.05, 0.95))
+        }
+
+
+# Data for testing observer reliability and correlation
+data_obs <- select(data_all,obs0:obs11)
+
+test_alpha <- kripp.alpha(t(data.matrix(data_obs)), method="interval")$value
+ test_alpha 
+
+test_alpha_jk <- jk_kripp.alpha(t(data.matrix(data_obs)))
+ test_alpha_jk
+
+#Test observer correlation with Spearman's rho
+
+meanrho_theta = function(x, xdata)
+        {
+        meanrho(xdata[x,])$value
+        }
+
+jk_meanrho = function(subj)
+        {
+         cs_jackknife = jackknife(1:nrow(subj), meanrho_theta, subj)
+         quantile(cs_jackknife$jack.values, c(0.05, 0.95))
+        }
+
+test_rho <- meanrho(data_obs)$value
+ test_rho
+
+test_rho_jk <- jk_meanrho(data_obs)
+ test_rho_jk
+
+```
+
+### Test for correlations among variables
+```{r Test for correlations among variables, echo=TRUE}
+
+# Data for testing variable correlations
+data_var <- select(data_all,colorscore,chlorophylla,symbiontdensity,nzpercent)
+
+test_var <- corr.test(data_var, method="spearman", adjust="holm", alpha=0.05)
+ test_var$r # Spearman's rho values
+ test_var$p # Adjusted p-values (above the diagonal)
+
+# To visualize quickly
+# test_cor_plot <- pairs.panels(data_cor,
+#       smooth=FALSE,scale=FALSE,ellipses=FALSE,lm=TRUE,method="spearman",
+#       cor=TRUE,hist.col="white",rug=FALSE)
+```
+
+### Create plots
+```{r Create plots, echo=TRUE}
+
+# Color data
+data_col <- select(data_all,colormean,colonylabel,colorcvmin,colorcvmax,
+        colormin,colormax)
+ data_col <- arrange(data_col,colormean)
+ new_order <- data_col$colonylabel # Reorder for graphing
+ data_col$colonylabel <- factor(data_col$colonylabel, levels=new_order)
+
+# Chlorophyll a data
+data_chl <- select(data_all,colorscore,chlorophylla)
+ data_chl <- melt(data_chl, id.vars="colorscore",na.remove = FALSE)
+
+# Density data
+data_den <- select(data_all,colorscore,symbiontdensity)
+ data_den <- melt(data_den, id.vars="colorscore", na.remove = FALSE)
+ data_den <- mutate(data_den,value=value/100000) # Rescale for graphing
+
+# NZ percent data
+data_nzp <- select(data_all,colorscore,nzpercent)
+ data_nzp <- melt(data_nzp, id.vars="colorscore", na.remove = FALSE)
+
+theme_set(theme_bw(base_size = 20))  
+
+plot_col <- ggplot(data=data_col, aes(x=colormean, y=colonylabel)) + 
+        geom_point(aes(size=5)) +
+        scale_x_continuous(limits = c(3.0, 6.0), breaks=seq(3.0, 6.0, 0.5)) +
+        geom_vline(xintercept=c(3.25,3.75,4.25,4.75,5.25,5.75), 
+                   linetype="dotted", color="grey") +
+        geom_errorbarh(aes(xmin=colorcvmin, xmax=colorcvmax), size=1, height=0.5) +
+        geom_errorbarh(aes(xmin=colormin, xmax=colormax), linetype=2, height=0) +
+        labs(x="Color Score\n", y="colony", title="A.") +
+        theme(plot.title = element_text(size=20, face="bold", vjust=2, hjust=0)) +
+        theme(
+                axis.title.x = element_text(vjust=-0.35),
+                axis.title.y = element_text(vjust=0.7),
+                legend.position = "none",
+                panel.grid.major = element_line(color="white"),
+                panel.grid.minor = element_line(color="white"),
+                panel.border = element_rect(color="black")
+          )
+
+plot_nzp <- ggplot(data=data_nzp, aes(x=colorscore, y=value)) + 
+        geom_smooth(method="lm",color="black",linetype="longdash") +
+        geom_dotplot(aes(fill=as.factor(colorscore)), binaxis="y", 
+                stackdir="center", binwidth=0.8) +
+        scale_fill_manual(values = c("black","black","black","black","black")) +
+        scale_x_continuous(limits = c(3.0, 6.0), breaks=seq(3.0, 6.0, 0.5)) +
+        scale_y_continuous(limits = c(70, 90), breaks=seq(70, 90, 5)) +
+        geom_vline(xintercept=c(3.25,3.75,4.25,4.75,5.25,5.75), 
+                   linetype="dotted", color="grey") +
+        annotate("text", x=6.0, y=90,hjust=1,vjust=1,
+                 label="rho = -0.027\np-adj = 1.00") +
+        labs(x="Color Score\n", y="normal zooxanthellae (%)", title="B.") +
+        theme(plot.title = element_text(size=20, face="bold", vjust=2, hjust=0)) +
+        theme(
+                axis.title.x = element_text(vjust=-0.35),
+                axis.title.y = element_text(vjust=0.7),
+                legend.position = "none",
+                panel.grid.major = element_line(color="white"),
+                panel.grid.minor = element_line(color="white"),
+                panel.border = element_rect(color="black")
+          )
+
+plot_den <- ggplot(data=data_den, aes(x=colorscore, y=value)) + 
+        geom_smooth(method="lm",color="black",linetype="longdash") +
+        geom_dotplot(aes(fill=as.factor(colorscore)), binaxis="y", 
+                stackdir="center", binwidth=0.8) +
+        scale_fill_manual(values = c("black","black","black","black","black")) +
+        scale_x_continuous(limits = c(3.0, 6.0), breaks=seq(3.0, 6.0, 0.5)) +
+        scale_y_continuous(limits = c(0, 25), breaks=seq(0, 25, 5)) +
+        geom_vline(xintercept=c(3.25,3.75,4.25,4.75,5.25,5.75), 
+                   linetype="dotted", color="grey") +
+        annotate("text", x=6.0, y=25,hjust=1,vjust=1,
+                 label="rho = -0.030\np-adj = 1.00") +
+        labs(x="Color Score\n", 
+             y=bquote('cells' ~cm^-3~ '('~x10^6*')'),title="C.") +
+        theme(plot.title = element_text(size=20, face="bold", vjust=2, hjust=0)) +
+        theme(
+                axis.title.x = element_text(vjust=-0.35),
+                axis.title.y = element_text(vjust=0.7),
+                legend.position = "none",
+                panel.grid.major = element_line(color="white"),
+                panel.grid.minor = element_line(color="white"),
+                panel.border = element_rect(color="black")
+          )
+
+plot_chl <- ggplot(data=data_chl, aes(x=colorscore, y=value)) + 
+        geom_smooth(method="lm",color="black",linetype="longdash") +
+        geom_dotplot(aes(fill=as.factor(colorscore)), binaxis="y", 
+                stackdir="center", binwidth=0.8) +
+        scale_fill_manual(values = c("black","black","black","black","black")) +
+        scale_x_continuous(limits = c(3.0, 6.0), breaks=seq(3.0, 6.0, 0.5)) +
+        scale_y_continuous(limits = c(0, 25), breaks=seq(0, 25, 5)) +
+        geom_vline(xintercept=c(3.25,3.75,4.25,4.75,5.25,5.75), 
+                 linetype="dotted", color="grey") +
+        annotate("text", x=6.0, y=25,hjust=1,vjust=1,
+                 label="rho = -0.472\np-adj = 0.215") +
+        labs(x="Color Score\n", 
+             y=bquote('chlorophyll'~italic(a)~mu*g~cm^-3),title="D.") +
+        theme(plot.title = element_text(size=20, face="bold", vjust=2, hjust=0)) +
+        theme(
+                axis.title.x = element_text(vjust=-0.35),
+                axis.title.y = element_text(vjust=0.7),
+                legend.position = "none",
+                panel.grid.major = element_line(color="white"),
+                panel.grid.minor = element_line(color="white"),
+                panel.border = element_rect(color="black")
+          )
+```
+
+## Define and execute multiplot function
+```{r Define and execute multiplot function, echo=TRUE, fig.width=12, fig.height=10}
+
+# Multiple plot function from: 
+# <http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/>
+
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  require(grid)
+
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  if (is.null(layout)) {
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    for (i in 1:numPlots) {
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+multiplot(plot_col,plot_den,plot_nzp,plot_chl,cols=2)
+
+# To export as .png for publication
+# Fig2 <- arrangeGrob(plot_col,plot_nzp,plot_den,plot_chl)
+# ggsave(filename="Figure2_final.png", 
+#       plot=Fig2, scale=2,width=6.6, height=5.3, units="in")
+```
+
+## Calculate Hibino correlations
+```{r Calculate Hibino correlations, echo=TRUE, fig.width=12, fig.height=10}
+
+# The bubble plot below shows the distribution of color scores over 2009
+
+data_bub <- read.table("hibino_bubble_data.txt",head=TRUE,check.names=FALSE)
+ data_bub <- melt(data=data_bub,
+                id="Month",variable.name="Score",value.name="Freq.")
+ data_bub <- subset(data_bub,Freq. != 0) # Remove zero values
+ data_bub$Month <- with(data_bub,
+                factor(Month,levels=rev(levels(Month)))) # Reverse months
+      
+plot_bub <- ggplot(data_bub,aes(Score, Month, size=Freq.)) + 
+        geom_point(shape=21, fill="black") +
+        scale_size_continuous(range=c(3,16)) +
+        scale_y_discrete(labels=c('Nov','Oct','Sep','Aug','Jul','Jun',
+                'May','Apr','Feb','Jan')) +
+        labs(x="Color Score\n", y="", title="A. Color Score Distribution 2009") +
+        theme(plot.title = element_text(size=20, face="bold", vjust=2)) +
+        theme(
+                axis.title.x = element_text(vjust=-0.35),
+                axis.title.y = element_text(vjust=0.7),
+                legend.position = "left"
+        )
+
+# This calculates monthly correlations.
+
+data_monthly <- cor(color_hibino[,2:13],nz_hibino[,2:13], 
+                       method = "spearman") # Only interested in the diagonal
+ monthly_rho <- diag(data_monthly)
+ monthly_rho 
+
+monthly_p <- rep(NA,13)
+        for (i in 2:13) {
+        temp <- cor.test(color_hibino[,i],nz_hibino[,i])
+        monthly_p[i] <- temp$p.value
+        }
+ monthly_p <- monthly_p[-1]
+ monthly_p
+
+# Based on this, April, May, June, and July are significant (all of these points have 
+# correlations > 0.6, so by adding a horizontal line at 0.6, we separate the 
+# significant from the non-significant correlations)
+
+# This plot shows correlations with NZ% in a time series
+
+monthly_pair <- cbind(c(10:1),monthly_rho[c(1:2,4:11)])
+ colnames(monthly_pair) <- c("month","rho")
+ monthly_pair <- data.frame(monthly_pair)
+ 
+plot_monthly <- ggplot(data=monthly_pair, aes(x=rho, y=month)) + 
+        geom_point(aes(size=5)) +
+        scale_size_continuous(range=c(3,12)) +
+        scale_x_continuous(limits = c(-0.2, 1), breaks=seq(-0.2, 1, 0.4)) +
+        scale_y_continuous(limits = c(1,10), breaks=seq(1,10,1), 
+           labels=c('Nov','Oct','Sep','Aug','Jul','Jun','May','Apr','Feb','Jan')) +
+        geom_vline(xintercept=0.6,linetype="dashed", color="black") +
+        labs(x="Spearman's Rho\n", y="", title="B. Monthly NZ% Correlations 2009") +
+        theme(plot.title = element_text(size=20, face="bold", vjust=2, hjust=0)) +
+        theme(
+                axis.title.x = element_text(vjust=-0.35),
+                axis.title.y = element_text(vjust=0.7),
+                legend.position = "none",
+                panel.grid.major = element_line(color="white"),
+                panel.grid.minor = element_line(color="white"),
+                panel.border = element_rect(color="black")
+          )
+
+multiplot(plot_bub,plot_monthly,cols=2)
+
+# To export as .png for publication
+# Fig3 <- arrangeGrob(plot_bub,plot_monthly,ncol=2)
+# ggsave(filename="Figure3_final.png", 
+#       plot=Fig3, scale=2,width=6.6, height=5.3, units="in")
+```
+
+## Make plots comparing to Hibino data
+```{r Make plots comparing to Hibino data, echo=TRUE, fig.width=12, fig.height=10}
+
+data_may09 <- data.frame(cbind(color_hibino[,6],nz_hibino[,6]))
+colnames(data_may09)=c("color","nz")
+
+data_jun09 <- data.frame(cbind(color_hibino[,7],nz_hibino[,7]))
+colnames(data_jun09)=c("color","nz")
+
+data_jan09 <- data.frame(cbind(color_hibino[,2],nz_hibino[,2]))
+colnames(data_jan09)=c("color","nz")
+
+# Note the January 2014 data is the same as in the first graph above.
+
+plot_may09 <- ggplot(data=data_may09, aes(x=color, y=nz)) + 
+        geom_smooth(method="lm",color="black",linetype="longdash") +
+        geom_dotplot(aes(fill=as.factor(color)), binaxis="y", 
+                stackdir="center", binwidth=3) +
+        scale_fill_manual(values=
+                c("black","black","black","black","black","black")) +
+        scale_x_continuous(limits = c(2.5, 5.5), breaks=seq(2.5, 5.5, 0.5)) +
+        scale_y_continuous(limits = c(20, 120), breaks=seq(20, 100, 20)) +
+        geom_vline(xintercept=c(2.75,3.25,3.75,4.25,4.75,5.25), 
+                   linetype="dotted", color="grey") +
+        annotate("text", x=5.5, y=20,hjust=1,vjust=0,
+                 label="rho = 0.753\np-adj = 0.004") +
+        labs(x="Color Score\n", y="normal zooxanthellae (%)", title="A. May 2009") +
+        theme(plot.title = element_text(size=20, face="bold", vjust=2, hjust=0)) +
+        theme(
+                axis.title.x = element_text(vjust=-0.35),
+                axis.title.y = element_text(vjust=0.7),
+                legend.position = "none",
+                panel.grid.major = element_line(color="white"),
+                panel.grid.minor = element_line(color="white"),
+                panel.border = element_rect(color="black")
+          )
+
+plot_jun09 <- ggplot(data=data_jun09, aes(x=color, y=nz)) + 
+        geom_smooth(method="lm",color="black",linetype="longdash") +
+        geom_dotplot(aes(fill=as.factor(color)), binaxis="y", 
+                stackdir="center", binwidth=3) +
+        scale_fill_manual(values=
+                c("black","black","black","black","black","black")) +
+        scale_x_continuous(limits = c(2.5, 5.5), breaks=seq(2.5, 5.5, 0.5)) +
+        scale_y_continuous(limits = c(20, 120), breaks=seq(20, 100, 20)) +
+        geom_vline(xintercept=c(2.75,3.25,3.75,4.25,4.75,5.25), 
+                   linetype="dotted", color="grey") +
+        annotate("text", x=5.5, y=20,hjust=1,vjust=0,
+                 label="rho = 0.726\np-adj = 0.009") +
+        labs(x="Color Score\n", y="normal zooxanthellae (%)", 
+             title="B. June 2009") +
+        theme(plot.title = element_text(size=20, face="bold", vjust=2, hjust=0)) +
+        theme(
+                axis.title.x = element_text(vjust=-0.35),
+                axis.title.y = element_text(vjust=0.7),
+                legend.position = "none",
+                panel.grid.major = element_line(color="white"),
+                panel.grid.minor = element_line(color="white"),
+                panel.border = element_rect(color="black")
+          )
+
+plot_jan09 <- ggplot(data=data_jan09, aes(x=color, y=nz)) + 
+        geom_smooth(method="lm",color="black",linetype="longdash") +
+        geom_dotplot(aes(fill=as.factor(color)), binaxis="y", 
+                stackdir="center", binwidth=3) +
+        scale_fill_manual(values=
+                c("black","black","black","black","black","black")) +
+        scale_x_continuous(limits = c(2.5, 5.5), breaks=seq(2.5, 5.5, 0.5)) +
+        scale_y_continuous(limits = c(20, 120), breaks=seq(20, 100, 20)) +
+        geom_vline(xintercept=c(2.75,3.25,3.75,4.25,4.75,5.25), 
+                   linetype="dotted", color="grey") +
+        annotate("text", x=5.5, y=20,hjust=1,vjust=0,
+                 label="rho = 0.347\np-adj = 0.515") +
+        labs(x="Color Score\n", y="normal zooxanthellae (%)", 
+             title="C. January 2009") +
+        theme(plot.title = element_text(size=20, face="bold", vjust=2, hjust=0)) +
+        theme(
+                axis.title.x = element_text(vjust=-0.35),
+                axis.title.y = element_text(vjust=0.7),
+                legend.position = "none",
+                panel.grid.major = element_line(color="white"),
+                panel.grid.minor = element_line(color="white"),
+                panel.border = element_rect(color="black")
+          )
+
+plot_jan14 <- ggplot(data=data_nzp, aes(x=colorscore, y=value)) + 
+        geom_smooth(method="lm",color="black",linetype="longdash") +
+        geom_dotplot(aes(fill=as.factor(colorscore)), binaxis="y", 
+                stackdir="center", binwidth=3) +
+        scale_fill_manual(values=
+                c("black","black","black","black","black","black")) +
+        scale_x_continuous(limits = c(2.5, 5.5), breaks=seq(2.5, 5.5, 0.5)) +
+        scale_y_continuous(limits = c(20, 120), breaks=seq(20, 100, 20)) +
+        geom_vline(xintercept=c(2.75,3.25,3.75,4.25,4.75,5.25), 
+                   linetype="dotted", color="grey") +
+        annotate("text", x=5.5, y=20,hjust=1,vjust=0,
+                 label="rho = -0.027\np-adj = 1.00") +
+        labs(x="Color Score\n", 
+             y="normal zooxanthellae (%)", title="D. January 2014") +
+        theme(plot.title = element_text(size=20, face="bold", vjust=2, hjust=0)) +
+        theme(
+                axis.title.x = element_text(vjust=-0.35),
+                axis.title.y = element_text(vjust=0.7),
+                legend.position = "none",
+                panel.grid.major = element_line(color="white"),
+                panel.grid.minor = element_line(color="white"),
+                panel.border = element_rect(color="black")
+          )
+
+multiplot(plot_may09,plot_jan09,plot_jun09,plot_jan14,cols=2)
+
+# To export as .png for publication
+# Fig4 <- arrangeGrob(plot_may09,plot_jun09,plot_jan09,plot_jan14)
+# ggsave(filename="Figure4_final.png", 
+#       plot=Fig4, scale=2,width=6.6, height=5.3, units="in")
+```
